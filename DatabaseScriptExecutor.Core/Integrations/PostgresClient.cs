@@ -78,7 +78,7 @@ public class PostgresClient : IDatabaseClient
         catch (DbException e)
         {
             await connection.CloseAsync();
-            return ScriptExecutionResult.Failure(fileName, e.Message);
+            return ScriptExecutionResult.Failure(fileName, e);
         }
     }
 }
