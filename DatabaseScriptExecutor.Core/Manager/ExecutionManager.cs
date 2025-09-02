@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using DatabaseScriptExecutor.Core.Integrations;
 using DatabaseScriptExecutor.Core.Interfaces;
 using DatabaseScriptExecutor.Core.Models;
@@ -13,6 +14,7 @@ public class ExecutionManager : IExecutionManager
     private readonly ILogger<ExecutionManager> _logger;
     private readonly List<string> _appliedScripts = [];
     private readonly List<string> _skippedScripts = [];
+
     public ExecutionManager(IOptions<DatabaseConfiguration> databaseConfiguration,
         ILogger<ExecutionManager> logger)
     {
@@ -20,22 +22,10 @@ public class ExecutionManager : IExecutionManager
         _logger = logger;
     }
 
-    public async Task<ExecutionResult> ExecuteScripts(string path)
+    private async Task<List<ScriptInformation>> GetScriptInformationOrderedAsync(List<string> files)
     {
-        var files = Directory.GetFiles(path, "*.sql", SearchOption.AllDirectories);
-        var client = new PostgresClient(_databaseConfiguration);
-        foreach (var record in _databaseConfiguration.databaseConnections)
-        {
-            var result = await client.InitializeScriptLogTable(record.database);
-            if (!result.IsSuccess)
-            {
-                _logger.LogCritical(
-                    $"Failed to initialize script log table for {record.database}. Error: {result.Error?.Message}");
-                return ExecutionResult.Failure(result.Error!);
-            }
-        }
-        
-        foreach (var file in files.Order())
+        List<ScriptInformation> scripts = [];
+        foreach (var file in files)
         {
             var filename = Path.GetFileName(file);
             var log = $"{filename}";
@@ -52,8 +42,66 @@ public class ExecutionManager : IExecutionManager
             {
                 log += " Failed!\n Script doesnt contain the target database info";
                 _logger.LogError(log);
-                return ExecutionResult.Failure(new ValidationException("Script doesnt contain the target database info"),_appliedScripts,_skippedScripts,filename);
+                var ex = new ValidationException("Script doesnt contain the target database info",
+                    new Exception("filename"));
+                throw ex;
             }
+
+            if (creationDate == null)
+            {
+                log += " Failed!\n Script doesnt contain the creation date info";
+                _logger.LogError(log);
+                var ex = new ValidationException("Script doesnt contain the creation date info",
+                    new Exception("filename"));
+                throw ex;
+            }
+
+            var dateTime = DateTime.ParseExact(creationDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            scripts.Add(new ScriptInformation
+            {
+                FileName = filename,
+                CreationDate = dateTime,
+                TargetDatabase = targetDatabase,
+                Creator = creator,
+                TargetTable = targetTable,
+                Script = script
+            });
+        }
+
+        return scripts.OrderBy(x => x.CreationDate).ToList();
+    }
+
+    public async Task<ExecutionResult> ExecuteScripts(string path)
+    {
+        var files = Directory.GetFiles(path, "*.sql", SearchOption.AllDirectories).ToList();
+        var client = new PostgresClient(_databaseConfiguration);
+        foreach (var record in _databaseConfiguration.databaseConnections)
+        {
+            var result = await client.InitializeScriptLogTable(record.database);
+            if (!result.IsSuccess)
+            {
+                _logger.LogCritical(
+                    $"Failed to initialize script log table for {record.database}. Error: {result.Error?.Message}");
+                return ExecutionResult.Failure(result.Error!);
+            }
+        }
+
+        List<ScriptInformation> scriptInformations = [];
+        try
+        {
+            scriptInformations = await GetScriptInformationOrderedAsync(files);
+        }
+        catch (Exception e)
+        {
+            return ExecutionResult.Failure(e, _appliedScripts, _skippedScripts, e.InnerException!.Message);
+        }
+
+        foreach (var file in scriptInformations)
+        {
+            var log = $"{file.FileName}";
+            var targetDatabase = file.TargetDatabase;
+            var filename = file.FileName;
+            var script = file.Script;
             var exists = await client.IsExecuted(targetDatabase, filename);
             if (exists)
             {
@@ -68,10 +116,11 @@ public class ExecutionManager : IExecutionManager
             {
                 log += $" Failed!\nError: {result.Error?.Message}";
                 _logger.LogError(log);
-                return ExecutionResult.Failure(result.Error!,_appliedScripts,_skippedScripts,filename);
+                return ExecutionResult.Failure(result.Error!, _appliedScripts, _skippedScripts, filename);
             }
+
             _appliedScripts.Add(filename);
-            _logger.LogInformation(log+" Success!");
+            _logger.LogInformation(log + " Success!");
         }
 
         _logger.LogInformation("All scripts executed successfully.");
