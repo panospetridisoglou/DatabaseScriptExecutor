@@ -43,11 +43,15 @@ public class PostgresClient : IDatabaseClient
                             """;
         var result = false;
         var sqlReader = await sql.ExecuteReaderAsync();
-        if (sqlReader.HasRows)
+        if (await sqlReader.ReadAsync())
         {
             result = true;
         }
-        result = false;
+        else
+        {
+            result = false;
+        }
+
         await sqlReader.CloseAsync();
         await connection.CloseAsync();
         return result;
@@ -76,6 +80,5 @@ public class PostgresClient : IDatabaseClient
             await connection.CloseAsync();
             return ScriptExecutionResult.Failure(fileName, e.Message);
         }
-        
     }
 }
