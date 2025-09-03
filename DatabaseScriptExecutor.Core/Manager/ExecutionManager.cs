@@ -102,7 +102,7 @@ public class ExecutionManager : IExecutionManager
             var targetDatabase = file.TargetDatabase;
             var filename = file.FileName;
             var script = file.Script;
-            var exists = await client.IsExecuted(targetDatabase, filename);
+            var exists = await client.IsExecuted(file);
             if (exists)
             {
                 log += " Skipped!\nScript already executed";
@@ -111,7 +111,7 @@ public class ExecutionManager : IExecutionManager
                 continue;
             }
 
-            var result = await client.ExecuteScript(filename, targetDatabase, script);
+            var result = await client.ExecuteScript(file);
             if (!result.IsSuccess)
             {
                 log += $" Failed!\nError: {result.Error?.Message}";

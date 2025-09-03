@@ -27,19 +27,26 @@ public class PostgresClient : IDatabaseClient
                                 file_name VARCHAR(255),
                                 execution_time TIMESTAMP
                             );
+                            ALTER TABLE script_log ADD COLUMN IF NOT EXISTS creation_date TIMESTAMP;
                           """;
-        return ExecuteScript("", database, createtable);
+        return ExecuteScript(new ()
+        {
+            TargetDatabase = database,
+            Script = createtable,
+            FileName = "script_log_init.sql",
+            CreationDate = DateTime.MinValue
+        });
     }
 
-    public async Task<bool> IsExecuted(string database, string fileName)
+    public async Task<bool> IsExecuted(ScriptInformation script)
     {
-        NpgsqlConnection connection = new(connectionStrings[database]);
+        NpgsqlConnection connection = new(connectionStrings[script.TargetDatabase]);
         await connection.OpenAsync();
         NpgsqlCommand? sql = new();
         sql.Connection = connection;
 
         sql.CommandText += $"""
-                              SELECT 1 FROM script_log WHERE file_name = '{fileName}'
+                              SELECT 1 FROM script_log WHERE file_name = '{script.FileName}' AND creation_date = '{script.CreationDate:yyyy-MM-dd}'
                             """;
         var result = false;
         var sqlReader = await sql.ExecuteReaderAsync();
@@ -57,28 +64,28 @@ public class PostgresClient : IDatabaseClient
         return result;
     }
 
-    public async Task<ScriptExecutionResult> ExecuteScript(string fileName, string database, string sqlquery)
+    public async Task<ScriptExecutionResult> ExecuteScript(ScriptInformation script)
     {
-        NpgsqlConnection connection = new(connectionStrings[database]);
+        NpgsqlConnection connection = new(connectionStrings[script.TargetDatabase]);
         try
         {
             await connection.OpenAsync();
             NpgsqlCommand? sql = new();
             sql.Connection = connection;
 
-            sql.CommandText = sqlquery;
+            sql.CommandText = script.Script;
             sql.CommandText += $"""
-                                  INSERT INTO script_log (file_name, execution_time)
-                                  VALUES ('{fileName}', NOW());
+                                  INSERT INTO script_log (file_name, execution_time,creation_date)
+                                  VALUES ('{script.FileName}', NOW()),'{script.CreationDate:yyyy-MM-dd}');
                                 """;
             var result = await sql.ExecuteNonQueryAsync();
             await connection.CloseAsync();
-            return ScriptExecutionResult.Success(fileName);
+            return ScriptExecutionResult.Success(script.FileName);
         }
         catch (DbException e)
         {
             await connection.CloseAsync();
-            return ScriptExecutionResult.Failure(fileName, e);
+            return ScriptExecutionResult.Failure(script.FileName, e);
         }
     }
 }
