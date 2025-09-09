@@ -29,7 +29,7 @@ public class PostgresClient : IDatabaseClient
                             );
                             ALTER TABLE script_log ADD COLUMN IF NOT EXISTS creation_date TIMESTAMP;
                           """;
-        return ExecuteScript(new ()
+        return ExecuteScript(new()
         {
             TargetDatabase = database,
             Script = createtable,
@@ -66,26 +66,37 @@ public class PostgresClient : IDatabaseClient
 
     public async Task<ScriptExecutionResult> ExecuteScript(ScriptInformation script)
     {
+        var success = false;
+        Exception? e = null;
         NpgsqlConnection connection = new(connectionStrings[script.TargetDatabase]);
-        try
-        {
-            await connection.OpenAsync();
-            NpgsqlCommand? sql = new();
-            sql.Connection = connection;
 
-            sql.CommandText = script.Script;
-            sql.CommandText += $"""
-                                  INSERT INTO script_log (file_name, execution_time,creation_date)
-                                  VALUES ('{script.FileName}', NOW()),'{script.CreationDate:yyyy-MM-dd}');
-                                """;
-            var result = await sql.ExecuteNonQueryAsync();
-            await connection.CloseAsync();
-            return ScriptExecutionResult.Success(script.FileName);
-        }
-        catch (DbException e)
+        await connection.OpenAsync();
+        await using (NpgsqlTransaction transaction = await connection.BeginTransactionAsync())
         {
-            await connection.CloseAsync();
-            return ScriptExecutionResult.Failure(script.FileName, e);
+            try
+            {
+                NpgsqlCommand? sql = new();
+                sql.Connection = connection;
+
+                sql.CommandText = script.Script;
+                sql.CommandText += $"""
+                                      INSERT INTO script_log (file_name, execution_time,creation_date)
+                                      VALUES ('{script.FileName}', NOW()),'{script.CreationDate:yyyy-MM-dd}');
+                                    """;
+                var result = await sql.ExecuteNonQueryAsync();
+                await transaction.CommitAsync();
+                success = true;
+            }
+            catch(Exception ee)
+            {
+                await transaction.RollbackAsync();
+                e = ee;
+            }
         }
+
+        await connection.CloseAsync();
+        return success
+            ? ScriptExecutionResult.Success(script.FileName)
+            : ScriptExecutionResult.Failure(script.FileName, e!);
     }
 }
