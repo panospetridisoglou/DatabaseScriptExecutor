@@ -66,6 +66,8 @@ public class ExecutionManager : IExecutionManager
                 TargetTable = targetTable,
                 Script = script
             });
+            _logger.LogInformation($"Found file {file}");
+
         }
 
         return scripts.OrderBy(x => x.CreationDate).ToList();
@@ -77,6 +79,7 @@ public class ExecutionManager : IExecutionManager
         var client = new PostgresClient(_databaseConfiguration);
         foreach (var record in _databaseConfiguration.databaseConnections)
         {
+            _logger.LogInformation($"Initializing script log table for {record.database}");
             var result = await client.InitializeScriptLogTable(record.database);
             if (!result.IsSuccess)
             {
@@ -110,7 +113,7 @@ public class ExecutionManager : IExecutionManager
                 _skippedScripts.Add(filename);
                 continue;
             }
-
+            _logger.LogInformation($"Executing script {filename}");
             var result = await client.ExecuteScript(file);
             if (!result.IsSuccess)
             {

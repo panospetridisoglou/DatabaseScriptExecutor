@@ -34,7 +34,7 @@ public class PostgresClient : IDatabaseClient
             TargetDatabase = database,
             Script = createtable,
             FileName = "script_log_init.sql",
-            CreationDate = DateTime.MinValue
+            CreationDate = new DateTime(1970, 1, 1)
         });
     }
 
@@ -66,6 +66,7 @@ public class PostgresClient : IDatabaseClient
 
     public async Task<ScriptExecutionResult> ExecuteScript(ScriptInformation script)
     {
+        
         var success = false;
         Exception? e = null;
         NpgsqlConnection connection = new(connectionStrings[script.TargetDatabase]);
@@ -77,11 +78,11 @@ public class PostgresClient : IDatabaseClient
             {
                 NpgsqlCommand? sql = new();
                 sql.Connection = connection;
-
+                sql.CommandTimeout = 0;
                 sql.CommandText = script.Script;
                 sql.CommandText += $"""
                                       INSERT INTO script_log (file_name, execution_time,creation_date)
-                                      VALUES ('{script.FileName}', NOW()),'{script.CreationDate:yyyy-MM-dd}');
+                                      VALUES ('{script.FileName}', NOW(),'{script.CreationDate:yyyy-MM-dd}');
                                     """;
                 var result = await sql.ExecuteNonQueryAsync();
                 await transaction.CommitAsync();
